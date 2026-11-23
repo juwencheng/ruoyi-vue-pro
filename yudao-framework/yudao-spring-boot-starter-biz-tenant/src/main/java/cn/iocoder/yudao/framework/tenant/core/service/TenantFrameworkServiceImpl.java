@@ -70,4 +70,10 @@ public class TenantFrameworkServiceImpl implements TenantFrameworkService {
         }
     }
 
+    @Override
+    public void refreshTenant(Long id) {
+        // 这里不能用 LoadingCache#refresh：缓存是 refreshAfterWrite + 异步重载，refresh 完成前仍返回旧值
+        validTenantCache.invalidate(id);
+    }
+
 }

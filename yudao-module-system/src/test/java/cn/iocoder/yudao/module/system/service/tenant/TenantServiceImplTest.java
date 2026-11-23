@@ -5,6 +5,7 @@ import cn.iocoder.yudao.framework.common.enums.CommonStatusEnum;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.tenant.config.TenantProperties;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
+import cn.iocoder.yudao.framework.tenant.core.service.TenantFrameworkService;
 import cn.iocoder.yudao.framework.test.core.ut.BaseDbUnitTest;
 import cn.iocoder.yudao.module.system.controller.admin.tenant.vo.tenant.TenantPageReqVO;
 import cn.iocoder.yudao.module.system.controller.admin.tenant.vo.tenant.TenantSaveReqVO;
@@ -74,6 +75,8 @@ public class TenantServiceImplTest extends BaseDbUnitTest {
     private MenuService menuService;
     @MockBean
     private PermissionService permissionService;
+    @MockBean
+    private TenantFrameworkService tenantFrameworkService;
 
     @BeforeEach
     public void setUp() {
@@ -209,6 +212,8 @@ public class TenantServiceImplTest extends BaseDbUnitTest {
         // verify 设置角色权限
         verify(permissionService).assignRoleMenu(eq(100L), eq(asSet(200L, 201L)));
         verify(permissionService).assignRoleMenu(eq(101L), eq(asSet(201L)));
+        // 更新提交后立即使租户校验缓存失效
+        verify(tenantFrameworkService).refreshTenant(dbTenant.getId());
     }
 
     @Test
@@ -247,6 +252,7 @@ public class TenantServiceImplTest extends BaseDbUnitTest {
         tenantService.deleteTenant(id);
         // 校验数据不存在了
         assertNull(tenantMapper.selectById(id));
+        verify(tenantFrameworkService).refreshTenant(id);
     }
 
     @Test

@@ -11,6 +11,7 @@ import cn.iocoder.yudao.framework.common.util.object.BeanUtils;
 import cn.iocoder.yudao.framework.datapermission.core.annotation.DataPermission;
 import cn.iocoder.yudao.framework.tenant.config.TenantProperties;
 import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
+import cn.iocoder.yudao.framework.tenant.core.service.TenantFrameworkService;
 import cn.iocoder.yudao.framework.tenant.core.util.TenantUtils;
 import cn.iocoder.yudao.module.system.controller.admin.permission.vo.role.RoleSaveReqVO;
 import cn.iocoder.yudao.module.system.controller.admin.tenant.vo.tenant.TenantPageReqVO;
@@ -30,10 +31,13 @@ import cn.iocoder.yudao.module.system.service.tenant.handler.TenantInfoHandler;
 import cn.iocoder.yudao.module.system.service.tenant.handler.TenantMenuHandler;
 import cn.iocoder.yudao.module.system.service.user.AdminUserService;
 import com.baomidou.dynamic.datasource.annotation.DSTransactional;
+import com.baomidou.dynamic.datasource.tx.TransactionContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.validation.annotation.Validated;
 
 import javax.annotation.Resource;
@@ -73,6 +77,9 @@ public class TenantServiceImpl implements TenantService {
     private MenuService menuService;
     @Resource
     private PermissionService permissionService;
+    @Autowired(required = false) // 关闭多租户时不会创建该 Bean
+    @Lazy // 避免 TenantFrameworkService -> TenantApi -> TenantService 循环依赖
+    private TenantFrameworkService tenantFrameworkService;
 
     @Override
     public List<Long> getTenantIdList() {
@@ -158,6 +165,8 @@ public class TenantServiceImpl implements TenantService {
         if (ObjectUtil.notEqual(tenant.getPackageId(), updateReqVO.getPackageId())) {
             updateTenantRoleMenu(tenant.getId(), tenantPackage.getMenuIds());
         }
+        // 提交后再失效校验缓存，避免并发请求在提交前把旧的过期时间重新加载进去
+        refreshTenantCacheAfterCommit(tenant.getId());
     }
 
     private void validTenantNameDuplicate(String name, Long id) {
@@ -220,6 +229,7 @@ public class TenantServiceImpl implements TenantService {
         validateUpdateTenant(id);
         // 删除
         tenantMapper.deleteById(id);
+        refreshTenantCacheAfterCommit(id);
     }
 
     @Override
@@ -229,6 +239,34 @@ public class TenantServiceImpl implements TenantService {
 
         // 2. 批量删除
         tenantMapper.deleteByIds(ids);
+        ids.forEach(this::refreshTenantCacheAfterCommit);
+    }
+
+    /**
+     * 事务提交后再失效租户校验缓存。没有事务时直接失效。
+     */
+    private void refreshTenantCacheAfterCommit(Long tenantId) {
+        if (tenantFrameworkService == null) {
+            return;
+        }
+        TransactionSynchronization synchronization = new TransactionSynchronization() {
+
+            @Override
+            public void afterCommit() {
+                tenantFrameworkService.refreshTenant(tenantId);
+            }
+
+        };
+        // @DSTransactional 走 dynamic-datasource 自己的事务，不会通知 Spring 的同步器
+        if (TransactionContext.getXID() != null) {
+            TransactionContext.registerSynchronization(synchronization);
+            return;
+        }
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(synchronization);
+            return;
+        }
+        tenantFrameworkService.refreshTenant(tenantId);
     }
 
     private TenantDO validateUpdateTenant(Long id) {

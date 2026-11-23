@@ -23,4 +23,13 @@ public interface TenantFrameworkService {
      */
     void validTenant(Long id);
 
+    /**
+     * 使指定租户的校验缓存失效，下一次校验重新加载
+     *
+     * 本地缓存按时间异步刷新，更新过期时间、状态后，请求仍可能读到旧的校验结果。
+     *
+     * @param id 租户编号
+     */
+    void refreshTenant(Long id);
+
 }
